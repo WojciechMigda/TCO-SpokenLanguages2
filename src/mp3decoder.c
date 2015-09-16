@@ -24,14 +24,34 @@
 #include <mpg123.h>
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <string.h>
 
-unsigned int
-mp3decoder(const char * fname, unsigned char * obuf, unsigned int sz)
+static inline
+MIN(size_t const P, size_t const Q)
 {
+    return P < Q ? P : Q;
+}
+
+struct mp3_params
+{
+    uint32_t rate;
+    uint32_t channels;
+    uint32_t encoding;
+};
+
+size_t
+mp3decoder(
+    const char * fname,
+    uint8_t * obuf,
+    size_t sz,
+    struct mp3_params * params_p)
+{
+    assert(obuf != NULL);
+
     mpg123_init();
 
     int err = MPG123_OK;
@@ -51,6 +71,13 @@ mp3decoder(const char * fname, unsigned char * obuf, unsigned int sz)
     int encoding = 0;
     mpg123_getformat(mh, &rate, &channels, &encoding);
 
+    if (params_p != NULL)
+    {
+        params_p->rate = rate;
+        params_p->channels = channels;
+        params_p->encoding = encoding;
+    }
+
     size_t total_read = 0;
     size_t done = 0;
     while ((mpg123_read(mh, buffer, MIN(BUFFER_SZ, sz - total_read), &done) == MPG123_OK) && (total_read < sz))
@@ -66,16 +93,3 @@ mp3decoder(const char * fname, unsigned char * obuf, unsigned int sz)
 
     return total_read;
 }
-
-#if 0
-int main()
-{
-    unsigned char buf[4000] = {0x5A};
-
-    const unsigned int nread = decoder("../data/train/000kouqjfnk.mp3", buf, sizeof (buf) / sizeof (buf[0]));
-
-    printf("Read %u bytes\n", nread);
-
-    return 0;
-}
-#endif
