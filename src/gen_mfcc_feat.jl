@@ -41,4 +41,16 @@ res = ccall((:mp3decoder, "./libmp3decoder"), Csize_t, (Ptr{Int8}, Ptr{Uint8}, C
 
 println(res)
 println("rate: ", mp3Params.rate, ", channels: ", mp3Params.channels, ", encoding: ", mp3Params.encoding)
-println(sig)
+#println(sig)
+
+#train = readdlm("D:/Workspace/TCO-SpokenLanguages2/data/trainingData.csv", ',')
+train = readdlm("/repo/topcoder/SpokenLanguages2/data/trainingData.csv", ',')
+NROW = size(train, 1)
+
+println(train[1, 1], "|", train[1, 2])
+println(train[2, 1], "|", train[2, 2])
+println(train[NROW, 1], "|", train[NROW, 2])
+
+for idx in [2:NROW]
+    #println(x)
+end
