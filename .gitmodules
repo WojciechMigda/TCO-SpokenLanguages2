@@ -1,0 +1,3 @@
+[submodule "mpg123"]
+	path = mpg123
+	url = https://github.com/WojciechMigda/mpg123.git
