@@ -61,6 +61,27 @@ function process_range{_Tp}(inames::AbstractVector{_Tp}, istart::Int, iend::Int)
     end
 end
 
+function downsample{_Tp<:FloatingPoint}(
+    ratio::Int,
+    tomono::Bool,
+    ivec::AbstractVector{_Tp},
+    ovec::AbstractVector{_Tp})
+
+    const STRIDE::Int = ratio * (tomono ? 2 : 1)
+    const ILEN::Int = size(ivec, 1)
+
+    resize!(ovec, div(ILEN, STRIDE))
+
+    opos::Int = 1
+    ipos::Int = 1
+    while ipos + STRIDE - 1 <= ILEN
+        ovec[opos] = mean(ivec[ipos:ipos + STRIDE - 1])
+
+        ipos += STRIDE
+        opos += 1
+    end
+end
+
 function main()
     const DATA_DIR = "$(THIS_DIR)/../../data"
     const CSV_DIR = DATA_DIR
@@ -84,14 +105,20 @@ function main()
         println("$(idx)   $(TRAIN_MP3)/$(TRAIN[idx, 1])")
         const NSAMP = 10 * 44100
         const NCHAN = 2
-        sig = Array(Int16, NSAMP * NCHAN)
-        const NREAD, MP3PARAMS = mp3decoder!("$(TRAIN_MP3)/$(TRAIN[idx, 1])", sig)
+        full_sig = Array(Int16, NSAMP * NCHAN)
+        const NREAD, MP3PARAMS = mp3decoder!("$(TRAIN_MP3)/$(TRAIN[idx, 1])", full_sig)
+
+        sig = similar(full_sig, Float64)
+        const DOWN_RATIO = 4
+        downsample(DOWN_RATIO, true, float64(full_sig), sig)
 
         # MFCC
-        @time mfcc([float(x) for x in sig], MP3PARAMS.rate * 2.)
+        @time mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
         # elapsed time: 7.802742415 seconds (155064324 bytes allocated, 1.88% gc time)
-        @time foo = mfcc([float(x) for x in sig], MP3PARAMS.rate * 2.)
+        @time foo = mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
         # elapsed time: 0.835244415 seconds (114095204 bytes allocated, 17.99% gc time)
+        @time @inbounds mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
+        @time @inbounds foo = mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
         println(typeof(foo))
         println(size(foo[1]))
         println(size(foo[2]))
