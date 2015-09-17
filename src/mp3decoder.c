@@ -46,11 +46,12 @@ struct mp3_params
 size_t
 mp3decoder(
     const char * fname,
-    uint8_t * obuf,
+    void * _obuf,
     size_t sz,
     struct mp3_params * params_p)
 {
-    assert(obuf != NULL);
+    assert(_obuf != NULL);
+    uint8_t * obuf = _obuf;
 
     mpg123_init();
 
