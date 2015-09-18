@@ -9,7 +9,7 @@ if [ "$(uname)" == "Darwin" ]; then
     export MAKE="make"
 elif [ "$(expr substr $(uname -s) 1 5)" == "Linux" ]; then
     export MAKE="make"
-    MPG123_CPU_ARG="--with-cpu=sse"
+    MPG123_CPU_ARG="--with-cpu=sse --with-cpu=x86"
 elif [ "$(expr substr $(uname -s) 1 10)" == "MINGW32_NT" -o "$(expr substr $(uname -s) 1 7)" == "MSYS_NT" ]; then
     export MAKE="mingw32-make"
     BUILD_TYPE_ARG="--build=i686-pc-mingw32"
