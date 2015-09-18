@@ -26,6 +26,7 @@
 ################################################################################
 
 using MFCC
+using HDF5
 
 type Mp3Params
     rate::Uint32
@@ -36,9 +37,6 @@ end
 
 function mp3decoder!(ifname::String, osig::AbstractVector{Int16})
     # we expect 10 secs of samples, int16, stereo at 44100 Hz
-    #const NSAMP = 10 * 44100
-    #const NCHAN = 2
-    #sig = Array(Int16, NSAMP * NCHAN)
     mp3params = Mp3Params(uint32(0), uint32(0), uint32(0))
     const NREAD =
 #        ccall((:mp3decoder, "libmp3decoder"),
@@ -61,23 +59,28 @@ function process_range{_Tp}(inames::AbstractVector{_Tp}, istart::Int, iend::Int)
     end
 end
 
-function downsample{_Tp<:FloatingPoint}(
+function downsample{_iTp, _oTp<:FloatingPoint}(
+    # code_native(downsample, (Int, Bool, Vector{Int}, Vector{Float64}))
     ratio::Int,
     tomono::Bool,
-    ivec::AbstractVector{_Tp},
-    ovec::AbstractVector{_Tp})
+    ivec::AbstractVector{_iTp},
+    ovec::AbstractVector{_oTp})
 
     const STRIDE::Int = ratio * (tomono ? 2 : 1)
     const ILEN::Int = size(ivec, 1)
 
     resize!(ovec, div(ILEN, STRIDE))
+    #fill!(ovec, 0)
 
     opos::Int = 1
     ipos::Int = 1
-    while ipos + STRIDE - 1 <= ILEN
-        ovec[opos] = mean(ivec[ipos:ipos + STRIDE - 1])
+    @simd for ipos = 1:STRIDE:ILEN - STRIDE + 1
+        @inbounds ovec[opos] = 0
+        @simd for sub = 0:STRIDE - 1
+            @inbounds ovec[opos] += ivec[ipos + sub]
+        end
+        @inbounds ovec[opos] /= STRIDE
 
-        ipos += STRIDE
         opos += 1
     end
 end
@@ -100,43 +103,56 @@ function main()
     println(TRAIN[2, 1], "|", TRAIN[2, 2])
     println(TRAIN[NROW, 1], "|", TRAIN[NROW, 2])
 
-    #for idx in [2:NROW]
-    for idx in [2:2]
+    const NSAMP = 10 * 44100
+    const NCHAN = 2
+    full_sig = Array(Int16, NSAMP * NCHAN)
+    sig = similar(full_sig, Float64)
+
+    vvX = Vector{Float64}[]
+    y = ASCIIString[]
+
+    #for idx in 2:NROW
+    for idx in 2:2
         println("$(idx)   $(TRAIN_MP3)/$(TRAIN[idx, 1])")
-        const NSAMP = 10 * 44100
-        const NCHAN = 2
-        full_sig = Array(Int16, NSAMP * NCHAN)
-        const NREAD, MP3PARAMS = mp3decoder!("$(TRAIN_MP3)/$(TRAIN[idx, 1])", full_sig)
+        @time const NREAD, MP3PARAMS = mp3decoder!("$(TRAIN_MP3)/$(TRAIN[idx, 1])", full_sig)
+        full_sig[1 + NREAD / 2:end] = 0
 
-        sig = similar(full_sig, Float64)
         const DOWN_RATIO = 4
-        downsample(DOWN_RATIO, true, float64(full_sig), sig)
+        @time downsample(DOWN_RATIO, true, full_sig, sig)
+        #sig /= maximum(abs(sig))
 
-        # MFCC
-        @time mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
-        # elapsed time: 7.802742415 seconds (155064324 bytes allocated, 1.88% gc time)
-        @time foo = mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
-        # elapsed time: 0.835244415 seconds (114095204 bytes allocated, 17.99% gc time)
-        @time @inbounds mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
-        @time @inbounds foo = mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
-        println(typeof(foo))
+        #@time @inbounds foo = mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
+        @time foo = mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO), modelorder=0, lifterexp=-22, usecmp=false)
+        #println(typeof(foo))
         println(size(foo[1]))
-        println(size(foo[2]))
-        println(foo[3])
+        println(foo[1])
 
+        push!(vvX, vec(foo[1]))
+        push!(y, TRAIN[idx, 2])
     end
+
+    X = hcat(vvX...)
+    #println(size(X, 1))
+    #println(size(X, 2))
+    #println(X[1,:])
+    #println(X[:,1])
+    #h5write("MFCC.h5", "lid/y", y)
+    #h5write("MFCC.h5", "lid/X_MFCC", X)
 end
 
 if ~isinteractive()
     const THIS_DIR = dirname(Base.source_path())
-    const LIB_MP3_DECODER = find_library(["libmp3decoder"], [THIS_DIR])
 
     @windows? (
     begin
         ENV["PATH"] = "$(ENV["PATH"]);$(THIS_DIR);$(THIS_DIR)/../external/bin"
         #println(ENV["PATH"])
+        const LIB_MP3_DECODER = "libmp3decoder"
     end
-    : ()
+    :
+    begin
+        const LIB_MP3_DECODER = find_library(["libmp3decoder"], [THIS_DIR, "$(THIS_DIR)/../external/bin"])
+    end
     )
     main()
 end
