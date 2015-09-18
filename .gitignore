@@ -8,3 +8,4 @@ external/
 *.so
 *.dll
 *.dll.a
+*.h5
