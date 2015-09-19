@@ -60,8 +60,24 @@ function preemphasis(signal, coeff=0.95)
     :param coeff: The preemphasis coefficient. 0 is no filter, default is 0.95.
     :returns: the filtered signal.
     """    
-    #return numpy.append(signal[0], signal[1:] - coeff * signal[:-1])
     return vcat(signal[1], signal[2:end] - signal[1:end - 1] * coeff)
+end
+
+function preemphasis!(signal, coeff=0.95)
+    """perform preemphasis on the input signal.
+    
+    :param signal: The signal to filter.
+    :param coeff: The preemphasis coefficient. 0 is no filter, default is 0.95.
+    """    
+    for i = -length(signal):-2 signal[-i] -= signal[-i - 1] * coeff end
+    """
+    m = signal[1]
+    @simd for i = 2:length(signal)
+        n = signal[i] - m * coeff
+        m = signal[i]
+        signal[i] = n
+    end
+    """
 end
 
 function framesig(sig, frame_len, frame_step, winfunc=ones)
@@ -109,6 +125,19 @@ function magspec(frames, NFFT)
     return abs(complex_spec)
 end
 
+function magspec2(frames, NFFT)
+    """Compute the squared magnitude spectrum of each frame in frames. If frames is an NxD matrix, output will be NxNFFT. 
+
+    :param frames: the array of frames. Each row is a frame.
+    :param NFFT: the FFT length to use. If NFFT > frame_len, the frames are zero-padded. 
+    :returns: If frames is an NxD matrix, output will be NxNFFT. Each row will be the magnitude spectrum of the corresponding frame.
+    """
+    padded_frames = hcat(frames, repeat(zeros(size(frames, 1)), outer=[1, NFFT - size(frames, 2) % NFFT]))
+    complex_spec = rfft(padded_frames, 2)
+    
+    return abs2(complex_spec)
+end
+
 function powspec(frames, NFFT)
     """Compute the power spectrum of each frame in frames. If frames is an NxD matrix, output will be NxNFFT. 
 
@@ -116,8 +145,17 @@ function powspec(frames, NFFT)
     :param NFFT: the FFT length to use. If NFFT > frame_len, the frames are zero-padded. 
     :returns: If frames is an NxD matrix, output will be NxNFFT. Each row will be the power spectrum of the corresponding frame.
     """
-    #TODO magspec2 -> drop .^2
     return 1.0 / NFFT * magspec(frames, NFFT) .^ 2
+end
+
+function powspec2(frames, NFFT)
+    """Compute the power spectrum of each frame in frames. If frames is an NxD matrix, output will be NxNFFT. 
+
+    :param frames: the array of frames. Each row is a frame.
+    :param NFFT: the FFT length to use. If NFFT > frame_len, the frames are zero-padded. 
+    :returns: If frames is an NxD matrix, output will be NxNFFT. Each row will be the power spectrum of the corresponding frame.
+    """
+    return 1.0 / NFFT * magspec2(frames, NFFT)
 end
 
 function get_filterbanks(nfilt=20, nfft=512, samplerate=16000, lowfreq=0, highfreq=samplerate / 2)
@@ -171,9 +209,9 @@ function fbank(signal, samplerate=16000, winlen=0.025, winstep=0.01,
         second return value is the energy in each frame (total energy, unwindowed)
     """          
     println("fbank enter")
-    @time signal = preemphasis(signal, preemph)
+    @time preemphasis!(signal, preemph)
     @time frames = framesig(signal, winlen * samplerate, winstep * samplerate)
-    @time pspec = powspec(frames, nfft)
+    @time pspec = powspec2(frames, nfft)
     @time energy = sum(pspec, 2) # this stores the total energy in each frame
     @time energy[find(x -> x == 0, energy)] = eps(typeof(energy[])) # if energy is zero, we get problems with log
 
@@ -203,6 +241,24 @@ function lifter(cepstra, L=22)
     end
 end
 
+function lifter!(cepstra, L=22)
+    """Apply a cepstral lifter the the matrix of cepstra. This has the effect of increasing the
+    magnitude of the high frequency DCT coeffs.
+    
+    :param cepstra: the matrix of mel-cepstra, will be numframes * numcep in size.
+    :param L: the liftering coefficient to use. Default is 22. L <= 0 disables lifter.
+    """
+    if L > 0
+        ncoeff = size(cepstra, 2)
+        for j = 1:size(cepstra, 2)
+            lift = 1 + (L / 2) * sin(pi * (j - 1) / L)
+            for i = 1:size(cepstra, 1)
+                cepstra[i, j] *= lift
+            end
+        end
+    end
+end
+
 ################################################################################
 
 function _mfcc(signal, samplerate=16000, winlen=0.025, winstep=0.01, numcep=13,
@@ -228,7 +284,7 @@ function _mfcc(signal, samplerate=16000, winlen=0.025, winstep=0.01, numcep=13,
     @time feat = log(feat)
     @time dct!(feat, 2)
     @time feat = feat[:, 1:numcep]
-    @time feat = lifter(feat, ceplifter)
+    @time lifter!(feat, ceplifter)
     if appendEnergy
         @time feat[:,1] = log(energy) # replace first cepstral coefficient with log of frame energy
     end
