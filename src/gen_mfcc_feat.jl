@@ -35,25 +35,25 @@ MFCC code ported from https://github.com/jameslyons/python_speech_features
 The MIT License (MIT)
 """
 
-function hz2mel(hz)
+function hz2mel(hz::Float64)
     """Convert a value in Hertz to Mels
 
     :param hz: a value in Hz. This can also be a numpy array, conversion proceeds element-wise.
     :returns: a value in Mels. If an array was passed in, an identical sized array is returned.
     """
-    return 2595 * log10(1 + hz / 700.0)
+    return 2595. * log10(1. + hz / 700.0)
 end
     
-function mel2hz(mel)
+function mel2hz(mel::Float64)
     """Convert a value in Mels to Hertz
 
     :param mel: a value in Mels. This can also be a numpy array, conversion proceeds element-wise.
     :returns: a value in Hertz. If an array was passed in, an identical sized array is returned.
     """
-    return 700 * (10 ^ (mel / 2595.0) - 1)
+    return 700. * (10. ^ (mel / 2595.0) - 1.)
 end
 
-function preemphasis(signal, coeff=0.95)
+function preemphasis(signal::Vector{Float64}, coeff=0.95)
     """perform preemphasis on the input signal.
     
     :param signal: The signal to filter.
@@ -63,24 +63,147 @@ function preemphasis(signal, coeff=0.95)
     return vcat(signal[1], signal[2:end] - signal[1:end - 1] * coeff)
 end
 
-function preemphasis!(signal, coeff=0.95)
+function preemphasis!(signal::Vector{Float64}, coeff=0.95)
     """perform preemphasis on the input signal.
     
     :param signal: The signal to filter.
     :param coeff: The preemphasis coefficient. 0 is no filter, default is 0.95.
     """    
-    for i = -length(signal):-2 signal[-i] -= signal[-i - 1] * coeff end
-    """
-    m = signal[1]
-    @simd for i = 2:length(signal)
-        n = signal[i] - m * coeff
-        m = signal[i]
-        signal[i] = n
+    #@inbounds for i = -length(signal):-2 signal[-i] -= signal[-i - 1] * coeff end
+    #"""
+    @inbounds begin
+        m = signal[1]
+        @simd for i = 2:length(signal)
+            n = signal[i] - m * coeff
+            m = signal[i]
+            signal[i] = n
+        end
     end
-    """
+    #"""
 end
 
-function framesig(sig, frame_len, frame_step, winfunc=ones)
+function lifter(cepstra::Array{Float64, 2}, L=22.)
+    """Apply a cepstral lifter the the matrix of cepstra. This has the effect of increasing the
+    magnitude of the high frequency DCT coeffs.
+    
+    :param cepstra: the matrix of mel-cepstra, will be numframes * numcep in size.
+    :param L: the liftering coefficient to use. Default is 22. L <= 0 disables lifter.
+    """
+    if L > 0
+        ncoeff = size(cepstra, 2)
+        lift = 1. + (L / 2.) * sin(pi * [0:ncoeff - 1] / L)
+        return cepstra .* lift'
+    else
+        # values of L <= 0, do nothing
+        return cepstra
+    end
+end
+
+function lifter!(cepstra::Array{Float64, 2}, L=22.)
+    """Apply a cepstral lifter the the matrix of cepstra. This has the effect of increasing the
+    magnitude of the high frequency DCT coeffs.
+    
+    :param cepstra: the matrix of mel-cepstra, will be numframes * numcep in size.
+    :param L: the liftering coefficient to use. Default is 22. L <= 0 disables lifter.
+    """
+    if L > 0
+        ncoeff = size(cepstra, 2)
+        for j = 1:size(cepstra, 2)
+            lift = 1. + (L / 2.) * sin(pi * (j - 1) / L)
+            for i = 1:size(cepstra, 1)
+                @inbounds cepstra[i, j] *= lift
+            end
+        end
+    end
+end
+
+function magspec(frames::Array{Float64, 2}, NFFT)
+    """Compute the magnitude spectrum of each frame in frames. If frames is an NxD matrix, output will be NxNFFT. 
+
+    :param frames: the array of frames. Each row is a frame.
+    :param NFFT: the FFT length to use. If NFFT > frame_len, the frames are zero-padded. 
+    :returns: If frames is an NxD matrix, output will be NxNFFT. Each row will be the magnitude spectrum of the corresponding frame.
+    """
+    padded_frames = hcat(frames, repeat(zeros(size(frames, 1)), outer=[1, NFFT - size(frames, 2) % NFFT]))
+    complex_spec = rfft(padded_frames, 2)
+    #TODO magspec2 -> abs2
+    return abs(complex_spec)
+end
+
+function magspec2(frames::Array{Float64, 2}, NFFT)
+    """Compute the squared magnitude spectrum of each frame in frames. If frames is an NxD matrix, output will be NxNFFT. 
+
+    :param frames: the array of frames. Each row is a frame.
+    :param NFFT: the FFT length to use. If NFFT > frame_len, the frames are zero-padded. 
+    :returns: If frames is an NxD matrix, output will be NxNFFT. Each row will be the magnitude spectrum of the corresponding frame.
+    """
+    #padded_frames = hcat(frames, repeat(zeros(size(frames, 1)), outer=[1, NFFT - size(frames, 2) % NFFT]))
+    println(magspec2)
+    @time padded_frames = reshape(resize!(vec(frames), size(frames, 1) * NFFT), size(frames, 1), NFFT)
+    
+    return abs2(rfft(padded_frames, 2))
+end
+
+function powmagspec(frames::Array{Float64, 2}, NFFT)
+    """Compute the squared magnitude spectrum of each frame in frames. If frames is an NxD matrix, output will be NxNFFT. 
+
+    :param frames: the array of frames. Each row is a frame.
+    :param NFFT: the FFT length to use. If NFFT > frame_len, the frames are zero-padded. 
+    :returns: If frames is an NxD matrix, output will be NxNFFT. Each row will be the magnitude spectrum of the corresponding frame.
+    """
+    #padded_frames = hcat(frames, repeat(zeros(size(frames, 1)), outer=[1, NFFT - size(frames, 2) % NFFT]))
+    padded_vec = resize!(vec(frames), size(frames, 1) * NFFT)
+    padded_vec[length(frames) + 1:end] = 0.
+    padded_frames = reshape(padded_vec, size(frames, 1), NFFT)
+    
+    return abs2(rfft(padded_frames, 2)) / NFFT
+end
+
+function magspec2!(spec::Array{Float64, 2}, frames::Array{Float64, 2}, NFFT)
+    """Compute the squared magnitude spectrum of each frame in frames. If frames is an NxD matrix, output will be NxNFFT. 
+
+    :param frames: the array of frames. Each row is a frame.
+    :param NFFT: the FFT length to use. If NFFT > frame_len, the frames are zero-padded. 
+    :returns: If frames is an NxD matrix, output will be NxNFFT. Each row will be the magnitude spectrum of the corresponding frame.
+    """
+    padded_frames = hcat(frames, repeat(zeros(size(frames, 1)), outer=[1, NFFT - size(frames, 2) % NFFT]))
+    copy!(spec, abs2(rfft(padded_frames, 2)))
+end
+
+function powspec(frames::Array{Float64, 2}, NFFT)
+    """Compute the power spectrum of each frame in frames. If frames is an NxD matrix, output will be NxNFFT. 
+
+    :param frames: the array of frames. Each row is a frame.
+    :param NFFT: the FFT length to use. If NFFT > frame_len, the frames are zero-padded. 
+    :returns: If frames is an NxD matrix, output will be NxNFFT. Each row will be the power spectrum of the corresponding frame.
+    """
+    return 1.0 / NFFT * magspec(frames, NFFT) .^ 2
+end
+
+function powspec2(frames::Array{Float64, 2}, NFFT)
+    """Compute the power spectrum of each frame in frames. If frames is an NxD matrix, output will be NxNFFT. 
+
+    :param frames: the array of frames. Each row is a frame.
+    :param NFFT: the FFT length to use. If NFFT > frame_len, the frames are zero-padded. 
+    :returns: If frames is an NxD matrix, output will be NxNFFT. Each row will be the power spectrum of the corresponding frame.
+    """
+    return 1.0 / NFFT * magspec2(frames, NFFT)
+end
+
+function powspec2!(pspec::Array{Float64, 2}, frames, NFFT)
+    """Compute the power spectrum of each frame in frames. If frames is an NxD matrix, output will be NxNFFT. 
+
+    :param frames: the array of frames. Each row is a frame.
+    :param NFFT: the FFT length to use. If NFFT > frame_len, the frames are zero-padded. 
+    :returns: If frames is an NxD matrix, output will be NxNFFT. Each row will be the power spectrum of the corresponding frame.
+    """
+    magspec2!(pspec, frames, NFFT)
+    pspec /= float(NFFT)
+end
+
+
+
+function framesig(sig::Vector{Float64}, frame_len, frame_step, winfunc=ones)
     """Frame a signal into overlapping frames.
 
     :param sig: the audio signal to frame.
@@ -108,54 +231,12 @@ function framesig(sig, frame_len, frame_step, winfunc=ones)
         repeat([0:frame_step:numframes * frame_step - 1]', outer=[frame_len, 1])'
 
     frames = padsignal[indices]
-    win = repeat(winfunc(frame_len)', outer=[numframes, 1])
-    return frames .* win
-end
-
-function magspec(frames, NFFT)
-    """Compute the magnitude spectrum of each frame in frames. If frames is an NxD matrix, output will be NxNFFT. 
-
-    :param frames: the array of frames. Each row is a frame.
-    :param NFFT: the FFT length to use. If NFFT > frame_len, the frames are zero-padded. 
-    :returns: If frames is an NxD matrix, output will be NxNFFT. Each row will be the magnitude spectrum of the corresponding frame.
-    """
-    padded_frames = hcat(frames, repeat(zeros(size(frames, 1)), outer=[1, NFFT - size(frames, 2) % NFFT]))
-    complex_spec = rfft(padded_frames, 2)
-    #TODO magspec2 -> abs2
-    return abs(complex_spec)
-end
-
-function magspec2(frames, NFFT)
-    """Compute the squared magnitude spectrum of each frame in frames. If frames is an NxD matrix, output will be NxNFFT. 
-
-    :param frames: the array of frames. Each row is a frame.
-    :param NFFT: the FFT length to use. If NFFT > frame_len, the frames are zero-padded. 
-    :returns: If frames is an NxD matrix, output will be NxNFFT. Each row will be the magnitude spectrum of the corresponding frame.
-    """
-    padded_frames = hcat(frames, repeat(zeros(size(frames, 1)), outer=[1, NFFT - size(frames, 2) % NFFT]))
-    complex_spec = rfft(padded_frames, 2)
-    
-    return abs2(complex_spec)
-end
-
-function powspec(frames, NFFT)
-    """Compute the power spectrum of each frame in frames. If frames is an NxD matrix, output will be NxNFFT. 
-
-    :param frames: the array of frames. Each row is a frame.
-    :param NFFT: the FFT length to use. If NFFT > frame_len, the frames are zero-padded. 
-    :returns: If frames is an NxD matrix, output will be NxNFFT. Each row will be the power spectrum of the corresponding frame.
-    """
-    return 1.0 / NFFT * magspec(frames, NFFT) .^ 2
-end
-
-function powspec2(frames, NFFT)
-    """Compute the power spectrum of each frame in frames. If frames is an NxD matrix, output will be NxNFFT. 
-
-    :param frames: the array of frames. Each row is a frame.
-    :param NFFT: the FFT length to use. If NFFT > frame_len, the frames are zero-padded. 
-    :returns: If frames is an NxD matrix, output will be NxNFFT. Each row will be the power spectrum of the corresponding frame.
-    """
-    return 1.0 / NFFT * magspec2(frames, NFFT)
+    if winfunc != ones
+        win = repeat(winfunc(frame_len)', outer=[numframes, 1])
+        return frames .* win
+    else
+        return frames
+    end
 end
 
 function get_filterbanks(nfilt=20, nfft=512, samplerate=16000, lowfreq=0, highfreq=samplerate / 2)
@@ -172,8 +253,8 @@ function get_filterbanks(nfilt=20, nfft=512, samplerate=16000, lowfreq=0, highfr
     @assert highfreq <= (samplerate / 2) "highfreq is greater than samplerate/2"
     
     # compute points evenly spaced in mels
-    lowmel = hz2mel(lowfreq)
-    highmel = hz2mel(highfreq)
+    lowmel = hz2mel(float(lowfreq))
+    highmel = hz2mel(float(highfreq))
 
     melpoints = linspace(lowmel, highmel, nfilt + 2)
     # our points are in Hz, but we use fft bins, so we have to convert
@@ -181,18 +262,20 @@ function get_filterbanks(nfilt=20, nfft=512, samplerate=16000, lowfreq=0, highfr
     bin = int(floor((nfft + 1) * map(mel2hz, melpoints) / samplerate)) + 1
 
     fbank = zeros(nfilt, div(nfft, 2) + 1)
-    @simd for j in 1:nfilt
-        @simd for i in int(bin[j]):int(bin[j + 1])
-            fbank[j, i] = (i - bin[j]) / (bin[j + 1] - bin[j])
+    @inbounds (
+        @simd for j in 1:nfilt
+            @simd for i in int(bin[j]):int(bin[j + 1])
+                fbank[j, i] = (i - bin[j]) / (bin[j + 1] - bin[j])
+            end
+            @simd for i in int(bin[j + 1]):int(bin[j + 2])
+                fbank[j, i] = (bin[j + 2] - i) / (bin[j + 2] - bin[j + 1])
+            end
         end
-        @simd for i in int(bin[j + 1]):int(bin[j + 2])
-            fbank[j, i] = (bin[j + 2] - i) / (bin[j + 2] - bin[j + 1])
-        end
-    end
+    )
     return fbank
 end
 
-function fbank(signal, samplerate=16000, winlen=0.025, winstep=0.01,
+function fbank(signal::Vector{Float64}, samplerate=16000, winlen=0.025, winstep=0.01,
     nfilt=26, nfft=512, lowfreq=0, highfreq=samplerate / 2, preemph=0.97)
     """Compute Mel-filterbank energy features from an audio signal.
 
@@ -210,58 +293,27 @@ function fbank(signal, samplerate=16000, winlen=0.025, winstep=0.01,
     """          
     println("fbank enter")
     @time preemphasis!(signal, preemph)
+    
+    # bottlenecks
     @time frames = framesig(signal, winlen * samplerate, winstep * samplerate)
-    @time pspec = powspec2(frames, nfft)
+    #@time pspec = powspec2(frames, nfft)
+    @time pspec = powmagspec(frames, nfft)
+    
     @time energy = sum(pspec, 2) # this stores the total energy in each frame
-    @time energy[find(x -> x == 0, energy)] = eps(typeof(energy[])) # if energy is zero, we get problems with log
+    @time energy[find(x -> x == 0, energy)] = eps(eltype(energy)) # if energy is zero, we get problems with log
 
     @time fb = get_filterbanks(nfilt, nfft, samplerate, lowfreq, highfreq)
     @time feat = pspec * fb' # compute the filterbank energies
-    @time feat[find(x -> x == 0, feat)] = eps(typeof(feat[])) # if feat is zero, we get problems with log
+    @time @inbounds feat[find(x -> x == 0, feat)] = eps(eltype(feat)) # if feat is zero, we get problems with log
 
     println("fbank leave")
 
     return feat, energy
 end
 
-function lifter(cepstra, L=22)
-    """Apply a cepstral lifter the the matrix of cepstra. This has the effect of increasing the
-    magnitude of the high frequency DCT coeffs.
-    
-    :param cepstra: the matrix of mel-cepstra, will be numframes * numcep in size.
-    :param L: the liftering coefficient to use. Default is 22. L <= 0 disables lifter.
-    """
-    if L > 0
-        ncoeff = size(cepstra, 2)
-        lift = 1 + (L / 2) * sin(pi * [0:ncoeff - 1] / L)
-        return cepstra .* lift'
-    else
-        # values of L <= 0, do nothing
-        return cepstra
-    end
-end
-
-function lifter!(cepstra, L=22)
-    """Apply a cepstral lifter the the matrix of cepstra. This has the effect of increasing the
-    magnitude of the high frequency DCT coeffs.
-    
-    :param cepstra: the matrix of mel-cepstra, will be numframes * numcep in size.
-    :param L: the liftering coefficient to use. Default is 22. L <= 0 disables lifter.
-    """
-    if L > 0
-        ncoeff = size(cepstra, 2)
-        for j = 1:size(cepstra, 2)
-            lift = 1 + (L / 2) * sin(pi * (j - 1) / L)
-            for i = 1:size(cepstra, 1)
-                cepstra[i, j] *= lift
-            end
-        end
-    end
-end
-
 ################################################################################
 
-function _mfcc(signal, samplerate=16000, winlen=0.025, winstep=0.01, numcep=13,
+function _mfcc(signal::Vector{Float64}, samplerate=16000, winlen=0.025, winstep=0.01, numcep=13,
                nfilt=26, nfft=512, lowfreq=0, highfreq=samplerate/2, preemph=0.97, ceplifter=22, appendEnergy=true)
     """Compute MFCC features from an audio signal.
 
@@ -281,9 +333,11 @@ function _mfcc(signal, samplerate=16000, winlen=0.025, winstep=0.01, numcep=13,
     """
     println("_mfcc enter")
     @time feat, energy = fbank(signal, samplerate, winlen, winstep, nfilt, nfft, lowfreq, highfreq, preemph)
+
     @time feat = log(feat)
     @time dct!(feat, 2)
     @time feat = feat[:, 1:numcep]
+    
     @time lifter!(feat, ceplifter)
     if appendEnergy
         @time feat[:,1] = log(energy) # replace first cepstral coefficient with log of frame energy
@@ -304,6 +358,7 @@ end
 function mp3decoder!(ifname::String, osig::AbstractVector{Int16})
     # we expect 10 secs of samples, int16, stereo at 44100 Hz
     mp3params = Mp3Params(uint32(0), uint32(0), uint32(0))
+
     const NREAD =
         ccall((:mp3decoder, LIB_MP3_DECODER),
             Csize_t, (Ptr{Uint8}, Ptr{Void}, Csize_t, Ptr{Mp3Params}),
@@ -386,7 +441,7 @@ function main()
         @time downsample(DOWN_RATIO, true, full_sig, sig)
         #sig /= maximum(abs(sig))
 
-        _sig = readdlm("./foo2.csv")
+        _sig::Vector{Float64} = vec(readdlm("./foo2.csv"))
         @time _foo = _mfcc(_sig, MP3PARAMS.rate / float(DOWN_RATIO))
         println(_foo[5:14,:])
         """
@@ -420,19 +475,20 @@ function main()
     #h5write("MFCC.h5", "lid/X_MFCC", X)
 end
 
-if ~isinteractive()
-    const THIS_DIR = dirname(Base.source_path())
+const THIS_DIR = dirname(Base.source_path())
 
-    @windows? (
-    begin
-        ENV["PATH"] = "$(ENV["PATH"]);$(THIS_DIR);$(THIS_DIR)/../external/bin"
-        #println(ENV["PATH"])
-        const LIB_MP3_DECODER = "libmp3decoder"
-    end
-    :
-    begin
-        const LIB_MP3_DECODER = find_library(["libmp3decoder"], [THIS_DIR, "$(THIS_DIR)/../external/bin"])
-    end
-    )
+@windows? (
+begin
+    ENV["PATH"] = "$(ENV["PATH"]);$(THIS_DIR);$(THIS_DIR)/../external/bin"
+    #println(ENV["PATH"])
+    const LIB_MP3_DECODER = "libmp3decoder"
+end
+:
+begin
+    const LIB_MP3_DECODER = find_library(["libmp3decoder"], [THIS_DIR, "$(THIS_DIR)/../external/bin"])
+end
+)
+
+if ~isinteractive()
     main()
 end
