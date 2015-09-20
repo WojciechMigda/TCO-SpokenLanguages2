@@ -212,6 +212,7 @@ function framesig(sig::Vector{Float64}, frame_len, frame_step, winfunc=ones)
     :param winfunc: the analysis window to apply to each frame. By default no window is applied.    
     :returns: an array of frames. Size is NUMFRAMES by frame_len.
     """
+    println("framesig <")
     const slen = size(sig, 1)
     frame_len = int(round(frame_len))
     frame_step = int(round(frame_step))
@@ -223,14 +224,24 @@ function framesig(sig::Vector{Float64}, frame_len, frame_step, winfunc=ones)
 
     padlen = int((numframes - 1) * frame_step + frame_len)
 
-    _zeros = zeros(padlen - slen)
-    padsignal = vcat(sig, _zeros)
+    # TODO, check which is faster
+    #padsignal = vcat(sig, zeros(padlen - slen))
+    resize!(sig, padlen)
+    sig[padlen + 1:end] = 0
 
-    indices =
-        repeat([1:frame_len]', outer=[numframes, 1]) +
-        repeat([0:frame_step:numframes * frame_step - 1]', outer=[frame_len, 1])'
-
-    frames = padsignal[indices]
+    frames = Array(Float64, numframes, frame_len)
+    print("    [framesig] ")
+    @time (
+    @simd for q = 1:frame_len
+        i = q
+        @simd for p = 0:numframes - 1
+            #i = p * frame_step + q
+            i += frame_step
+            @inbounds frames[p + 1, q] = sig[i]
+        end
+    end
+    )
+    
     if winfunc != ones
         win = repeat(winfunc(frame_len)', outer=[numframes, 1])
         return frames .* win
@@ -292,18 +303,26 @@ function fbank(signal::Vector{Float64}, samplerate=16000, winlen=0.025, winstep=
         second return value is the energy in each frame (total energy, unwindowed)
     """          
     println("fbank enter")
+    print("    [preemphasis!] ")
     @time preemphasis!(signal, preemph)
     
     # bottlenecks
+    print("    [framesig] ")
     @time frames = framesig(signal, winlen * samplerate, winstep * samplerate)
     #@time pspec = powspec2(frames, nfft)
+    print("    [powmagspec] ")
     @time pspec = powmagspec(frames, nfft)
     
+    print("    [sum(psepc)] ")
     @time energy = sum(pspec, 2) # this stores the total energy in each frame
-    @time energy[find(x -> x == 0, energy)] = eps(eltype(energy)) # if energy is zero, we get problems with log
+    print("    [energy / eps] ")
+    @time @inbounds energy[find(x -> x == 0, energy)] = eps(eltype(energy)) # if energy is zero, we get problems with log
 
+    print("    [get_filterbanks] ")
     @time fb = get_filterbanks(nfilt, nfft, samplerate, lowfreq, highfreq)
+    print("    [pspec * fb'] ")
     @time feat = pspec * fb' # compute the filterbank energies
+    print("    [feat/ eps] ")
     @time @inbounds feat[find(x -> x == 0, feat)] = eps(eltype(feat)) # if feat is zero, we get problems with log
 
     println("fbank leave")
@@ -332,14 +351,20 @@ function _mfcc(signal::Vector{Float64}, samplerate=16000, winlen=0.025, winstep=
     :returns: A numpy array of size (NUMFRAMES by numcep) containing features. Each row holds 1 feature vector.
     """
     println("_mfcc enter")
+    print("    [fbank] ")
     @time feat, energy = fbank(signal, samplerate, winlen, winstep, nfilt, nfft, lowfreq, highfreq, preemph)
 
+    print("    [log(feat)] ")
     @time feat = log(feat)
+    print("    [dct!] ")
     @time dct!(feat, 2)
+    print("    [feat reshaping] ")
     @time feat = feat[:, 1:numcep]
     
+    print("    [lifter!] ")
     @time lifter!(feat, ceplifter)
     if appendEnergy
+        print("    [append energy] ")
         @time feat[:,1] = log(energy) # replace first cepstral coefficient with log of frame energy
     end
     println("_mfcc leave")
