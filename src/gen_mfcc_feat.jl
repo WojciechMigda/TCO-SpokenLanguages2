@@ -25,7 +25,6 @@
 #
 ################################################################################
 
-using MFCC
 using HDF5
 
 ################################################################################
@@ -138,7 +137,6 @@ function magspec2(frames::Array{Float64, 2}, NFFT)
     :returns: If frames is an NxD matrix, output will be NxNFFT. Each row will be the magnitude spectrum of the corresponding frame.
     """
     #padded_frames = hcat(frames, repeat(zeros(size(frames, 1)), outer=[1, NFFT - size(frames, 2) % NFFT]))
-    println(magspec2)
     @time padded_frames = reshape(resize!(vec(frames), size(frames, 1) * NFFT), size(frames, 1), NFFT)
     
     return abs2(rfft(padded_frames, 2))
@@ -212,7 +210,6 @@ function framesig(sig::Vector{Float64}, frame_len, frame_step, winfunc=ones)
     :param winfunc: the analysis window to apply to each frame. By default no window is applied.    
     :returns: an array of frames. Size is NUMFRAMES by frame_len.
     """
-    println("framesig <")
     const slen = size(sig, 1)
     frame_len = int(round(frame_len))
     frame_step = int(round(frame_step))
@@ -222,7 +219,7 @@ function framesig(sig::Vector{Float64}, frame_len, frame_step, winfunc=ones)
         numframes = 1 + int(ceil((1.0 * slen - frame_len) / frame_step))
     end
 
-    padlen = int((numframes - 1) * frame_step + frame_len)
+    const padlen = int((numframes - 1) * frame_step + frame_len)
 
     # TODO, check which is faster
     #padsignal = vcat(sig, zeros(padlen - slen))
@@ -230,17 +227,13 @@ function framesig(sig::Vector{Float64}, frame_len, frame_step, winfunc=ones)
     sig[padlen + 1:end] = 0
 
     frames = Array(Float64, numframes, frame_len)
-    print("    [framesig] ")
-    @time (
     @simd for q = 1:frame_len
         i = q
         @simd for p = 0:numframes - 1
-            #i = p * frame_step + q
-            i += frame_step
             @inbounds frames[p + 1, q] = sig[i]
+            i += frame_step
         end
     end
-    )
     
     if winfunc != ones
         win = repeat(winfunc(frame_len)', outer=[numframes, 1])
@@ -272,14 +265,18 @@ function get_filterbanks(nfilt=20, nfft=512, samplerate=16000, lowfreq=0, highfr
     #  from Hz to fft bin number
     bin = int(floor((nfft + 1) * map(mel2hz, melpoints) / samplerate)) + 1
 
-    fbank = zeros(nfilt, div(nfft, 2) + 1)
+    fbank = zeros(div(nfft, 2) + 1, nfilt)
     @inbounds (
         @simd for j in 1:nfilt
             @simd for i in int(bin[j]):int(bin[j + 1])
-                fbank[j, i] = (i - bin[j]) / (bin[j + 1] - bin[j])
+                fbank[i, j] = (i - bin[j]) / (bin[j + 1] - bin[j])
             end
+        end
+    )
+    @inbounds (
+        @simd for j in 1:nfilt
             @simd for i in int(bin[j + 1]):int(bin[j + 2])
-                fbank[j, i] = (bin[j + 2] - i) / (bin[j + 2] - bin[j + 1])
+                fbank[i, j] = (bin[j + 2] - i) / (bin[j + 2] - bin[j + 1])
             end
         end
     )
@@ -302,37 +299,24 @@ function fbank(signal::Vector{Float64}, samplerate=16000, winlen=0.025, winstep=
     :returns: 2 values. The first is a numpy array of size (NUMFRAMES by nfilt) containing features. Each row holds 1 feature vector. The
         second return value is the energy in each frame (total energy, unwindowed)
     """          
-    println("fbank enter")
-    print("    [preemphasis!] ")
-    @time preemphasis!(signal, preemph)
+    preemphasis!(signal, preemph)
     
-    # bottlenecks
-    print("    [framesig] ")
-    @time frames = framesig(signal, winlen * samplerate, winstep * samplerate)
-    #@time pspec = powspec2(frames, nfft)
-    print("    [powmagspec] ")
-    @time pspec = powmagspec(frames, nfft)
+    frames = framesig(signal, winlen * samplerate, winstep * samplerate)
+    pspec = powmagspec(frames, nfft)
     
-    print("    [sum(psepc)] ")
-    @time energy = sum(pspec, 2) # this stores the total energy in each frame
-    print("    [energy / eps] ")
-    @time @inbounds energy[find(x -> x == 0, energy)] = eps(eltype(energy)) # if energy is zero, we get problems with log
+    energy = sum(pspec, 2) # this stores the total energy in each frame
+    @inbounds energy[find(x -> x == 0, energy)] = eps(eltype(energy)) # if energy is zero, we get problems with log
 
-    print("    [get_filterbanks] ")
-    @time fb = get_filterbanks(nfilt, nfft, samplerate, lowfreq, highfreq)
-    print("    [pspec * fb'] ")
-    @time feat = pspec * fb' # compute the filterbank energies
-    print("    [feat/ eps] ")
-    @time @inbounds feat[find(x -> x == 0, feat)] = eps(eltype(feat)) # if feat is zero, we get problems with log
-
-    println("fbank leave")
+    fb = get_filterbanks(nfilt, nfft, samplerate, lowfreq, highfreq)
+    feat = pspec * fb # compute the filterbank energies
+    @inbounds feat[find(x -> x == 0, feat)] = eps(eltype(feat)) # if feat is zero, we get problems with log
 
     return feat, energy
 end
 
 ################################################################################
 
-function _mfcc(signal::Vector{Float64}, samplerate=16000, winlen=0.025, winstep=0.01, numcep=13,
+function mfcc(signal::Vector{Float64}, samplerate=16000, winlen=0.025, winstep=0.01, numcep=13,
                nfilt=26, nfft=512, lowfreq=0, highfreq=samplerate/2, preemph=0.97, ceplifter=22, appendEnergy=true)
     """Compute MFCC features from an audio signal.
 
@@ -350,24 +334,17 @@ function _mfcc(signal::Vector{Float64}, samplerate=16000, winlen=0.025, winstep=
     :param appendEnergy: if this is true, the zeroth cepstral coefficient is replaced with the log of the total frame energy.
     :returns: A numpy array of size (NUMFRAMES by numcep) containing features. Each row holds 1 feature vector.
     """
-    println("_mfcc enter")
-    print("    [fbank] ")
-    @time feat, energy = fbank(signal, samplerate, winlen, winstep, nfilt, nfft, lowfreq, highfreq, preemph)
+    feat, energy = fbank(signal, samplerate, winlen, winstep, nfilt, nfft, lowfreq, highfreq, preemph)
 
-    print("    [log(feat)] ")
-    @time feat = log(feat)
-    print("    [dct!] ")
-    @time dct!(feat, 2)
-    print("    [feat reshaping] ")
-    @time feat = feat[:, 1:numcep]
+    feat = log(feat)
+    dct!(feat, 2)
+    feat = feat[:, 1:numcep]
     
-    print("    [lifter!] ")
-    @time lifter!(feat, ceplifter)
+    lifter!(feat, ceplifter)
     if appendEnergy
-        print("    [append energy] ")
-        @time feat[:,1] = log(energy) # replace first cepstral coefficient with log of frame energy
+        feat[:,1] = log(energy) # replace first cepstral coefficient with log of frame energy
     end
-    println("_mfcc leave")
+
     return feat
 end
 ################################################################################
@@ -415,7 +392,6 @@ function downsample{_iTp, _oTp<:FloatingPoint}(
     const ILEN::Int = size(ivec, 1)
 
     resize!(ovec, div(ILEN, STRIDE))
-    #fill!(ovec, 0)
 
     opos::Int = 1
     ipos::Int = 1
@@ -439,15 +415,6 @@ function main()
     const TRAIN = readdlm(TRAIN_CSV, ',')
     const NROW = size(TRAIN, 1)
 
-    #println(typeof(TRAIN[1, :])) # Array{Any,2}
-    #println(typeof(TRAIN[:])) # Array{Any,1}
-    #println(typeof(TRAIN[:, 1])) # Array{Any,1}
-    #println(typeof(TRAIN[2, 1])) # SubString{ASCIIString}
-    #process_range(TRAIN[:, 1], 1, 1000)
-    println(TRAIN[1, 1], "|", TRAIN[1, 2])
-    println(TRAIN[2, 1], "|", TRAIN[2, 2])
-    println(TRAIN[NROW, 1], "|", TRAIN[NROW, 2])
-
     const NSAMP = 10 * 44100
     const NCHAN = 2
     full_sig = Array(Int16, NSAMP * NCHAN)
@@ -457,47 +424,25 @@ function main()
     y = ASCIIString[]
 
     #for idx in 2:NROW
-    for idx in 2:5
-        println("$(idx)   $(TRAIN_MP3)/$(TRAIN[idx, 1])")
-        @time const NREAD, MP3PARAMS = mp3decoder!("$(TRAIN_MP3)/$(TRAIN[idx, 1])", full_sig)
-        full_sig[1 + NREAD / 2:end] = 0
+    for idx in 2:22
+        println("$(TRAIN[idx, 1])")
+        const NREAD, MP3PARAMS = mp3decoder!("$(TRAIN_MP3)/$(TRAIN[idx, 1])", full_sig)
+        @inbounds full_sig[1 + NREAD / 2:end] = 0
 
         const DOWN_RATIO = 4
-        @time downsample(DOWN_RATIO, true, full_sig, sig)
-        #sig /= maximum(abs(sig))
+        downsample(DOWN_RATIO, true, full_sig, sig)
 
-        _sig::Vector{Float64} = vec(readdlm("./foo2.csv"))
-        @time _foo = _mfcc(_sig, MP3PARAMS.rate / float(DOWN_RATIO))
-        println(_foo[5:14,:])
-        """
-[-36.04365338911715 -2.7816942375056187e-15 -4.1322902854678015e-15 -4.948773825620595e-15 -5.112811535936408e-15 -4.623495469039853e-15 -3.597392257957527e-15 -2.2462808275634186e-15 -8.368335071669897e-16 3.600138964809304e-16 1.120263879522089e-15 1.3087830420233828e-15 9.039024328670567e-16
- -36.04365338911715 -2.7816942375056187e-15 -4.1322902854678015e-15 -4.948773825620595e-15 -5.112811535936408e-15 -4.623495469039853e-15 -3.597392257957527e-15 -2.2462808275634186e-15 -8.368335071669897e-16 3.600138964809304e-16 1.120263879522089e-15 1.3087830420233828e-15 9.039024328670567e-16
- -36.04365338911715 -2.7816942375056187e-15 -4.1322902854678015e-15 -4.948773825620595e-15 -5.112811535936408e-15 -4.623495469039853e-15 -3.597392257957527e-15 -2.2462808275634186e-15 -8.368335071669897e-16 3.600138964809304e-16 1.120263879522089e-15 1.3087830420233828e-15 9.039024328670567e-16
- -36.04365338911715 -2.7816942375056187e-15 -4.1322902854678015e-15 -4.948773825620595e-15 -5.112811535936408e-15 -4.623495469039853e-15 -3.597392257957527e-15 -2.2462808275634186e-15 -8.368335071669897e-16 3.600138964809304e-16 1.120263879522089e-15 1.3087830420233828e-15 9.039024328670567e-16
- 5.01854363329326 1.7002922966193872 -0.4609932749155671 7.115839274771968 2.0166904859617567 14.680559735072626 8.139870594749334 0.4952507178771307 -16.402947004517227 -9.591542203596502 -9.064206910294999 -1.7392328318119117 8.681381939936253
- 6.253057451202818 4.689775275491571 -2.169782425332075 3.700404786770254 -7.8260704685821665 3.2138549653839843 -3.3616223215820837 14.530450864707612 -0.46284378139648136 5.055900128809202 -7.726609924090707 3.1065968846681375 -0.9296507949427201
- 6.862359480564352 3.558960852829561 -2.495597592986346 6.285401892154045 -10.361812674575447 3.277860895413364 -9.539924014329376 8.91449638045395 0.31249140840785217 -6.024122538313943 -6.770259176313748 3.408454865091982 -3.8132870283127818
- 6.96384936996908 2.2235512299128506 -0.6911468783552634 4.704014199582309 -13.932832529486845 -0.5416167850569376 -13.194613268804664 4.834724097968524 -2.9517881891170012 -10.809905714434256 -6.448128453863021 3.012507066061671 -6.9828107767115295
- 7.027670910739485 3.331087110518866 -0.44837652002254896 3.2688040520487633 -11.245391695091751 5.4820988394593595 -10.575808876755852 -1.6028968623921778 -3.226320460472883 -4.191275390999003 -1.4888877059427994 -2.743011259008628 -4.000326512717334
- 7.117967044335296 3.8751798002651183 -3.024658687780246 5.186068650426844 -11.304451805242223 -0.835453755621828 -7.084805537977053 0.9486514758429959 -6.306329734501795 -2.7710406099759615 -12.540319881346758 -10.463982367930694 -3.4940740045574143]
-        """
+        print("  [MFCC]  ")
+        @time mfcc_feat = mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
 
-        #@time @inbounds foo = mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
-        @time foo = mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
-        println(size(foo[1]))
-        #println(foo[1])
-
-        push!(vvX, vec(foo[1]))
+        push!(vvX, vec(mfcc_feat))
         push!(y, TRAIN[idx, 2])
     end
 
     X = hcat(vvX...)
-    #println(size(X, 1))
-    #println(size(X, 2))
-    #println(X[1,:])
-    #println(X[:,1])
-    #h5write("MFCC.h5", "lid/y", y)
-    #h5write("MFCC.h5", "lid/X_MFCC", X)
+
+    h5write("MFCC.h5", "lid/y", y)
+    h5write("MFCC.h5", "lid/X_MFCC", X)
 end
 
 const THIS_DIR = dirname(Base.source_path())
