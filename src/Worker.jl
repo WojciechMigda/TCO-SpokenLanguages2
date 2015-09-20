@@ -7,7 +7,7 @@
 #
 ################################################################################
 #
-#  Filename: gen_mfcc_feat.jl
+#  Filename: module.jl
 #
 #  Decription:
 #       Generate MFCC feature vectors
@@ -21,16 +21,28 @@
 #  --------
 #  Date         Who  Ticket     Description
 #  ----------   ---  ---------  ------------------------------------------------
-#  2015-09-16   wm              Initial version
+#  2015-09-20   wm              Initial version
 #
 ################################################################################
 
-addprocs(CPU_CORES)
+module Worker
 
-using HDF5
-@everywhere using Worker
+#export gen_mfcc
+export reduce
 
-################################################################################
+const THIS_DIR = dirname(Base.source_path())
+
+@windows? (
+begin
+    ENV["PATH"] = "$(ENV["PATH"]);$(THIS_DIR);$(THIS_DIR)/../external/bin"
+    #println(ENV["PATH"])
+    const LIB_MP3_DECODER = "libmp3decoder"
+end
+:
+begin
+    const LIB_MP3_DECODER = find_library(["libmp3decoder"], [THIS_DIR, "$(THIS_DIR)/../external/bin"])
+end
+)
 
 """
 MFCC code ported from https://github.com/jameslyons/python_speech_features
@@ -433,70 +445,4 @@ function reduce(lhs::(Vector{Vector{Float64}}, Vector{ASCIIString}), rhs::(Vecto
     return (vcat(lhs[1], rhs[1]), vcat(lhs[2], rhs[2]))
 end
 
-function main()
-    const DATA_DIR = "$(THIS_DIR)/../../data"
-    const CSV_DIR = DATA_DIR
-    const TRAIN_CSV = "$(CSV_DIR)/trainingData.csv"
-    const TRAIN_MP3 = "$(DATA_DIR)/train"
-
-    const TRAIN = readdlm(TRAIN_CSV, ',')
-    const NROW = size(TRAIN, 1)
-
-    const NSAMP = 10 * 44100
-    const NCHAN = 2
-    full_sig = Array(Int16, NSAMP * NCHAN)
-    sig = similar(full_sig, Float64)
-
-    vvX = Vector{Float64}[]
-    y = ASCIIString[]
-
-    #for idx in 2:NROW
-    for idx in 2:5
-        println("$(TRAIN[idx, 1])")
-        const NREAD, MP3PARAMS = mp3decoder!("$(TRAIN_MP3)/$(TRAIN[idx, 1])", full_sig)
-        @inbounds full_sig[1 + NREAD / 2:end] = 0
-
-        const DOWN_RATIO = 4
-        downsample(DOWN_RATIO, true, full_sig, sig)
-
-        print("  [MFCC]  ")
-        @time mfcc_feat = mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
-
-        push!(vvX, vec(mfcc_feat))
-        push!(y, TRAIN[idx, 2])
-    end
-
-    println(size(TRAIN))
-    #const TRAIN_SUBSETS = int(linspace(1, size(TRAIN, 1), 5))
-    const TRAIN_SUBSETS = int(linspace(1, 30, 5)) # start from 1 to skip the header row
-    println(TRAIN_SUBSETS)
-
-    foo = @parallel reduce for i = 1:length(TRAIN_SUBSETS) - 1
-        println("doing ", TRAIN_SUBSETS[i] + 1, " to ", TRAIN_SUBSETS[i + 1])
-        Worker.gen_mfcc(sub(TRAIN, TRAIN_SUBSETS[i] + 1:TRAIN_SUBSETS[i + 1], :))
-    end
-    println(foo[2])
-
-    X = hcat(vvX...)
-
-    #h5write("MFCC.h5", "lid/y", y)
-    #h5write("MFCC.h5", "lid/X_MFCC", X)
-end
-
-const THIS_DIR = dirname(Base.source_path())
-
-@windows? (
-begin
-    ENV["PATH"] = "$(ENV["PATH"]);$(THIS_DIR);$(THIS_DIR)/../external/bin"
-    #println(ENV["PATH"])
-    const LIB_MP3_DECODER = "libmp3decoder"
-end
-:
-begin
-    const LIB_MP3_DECODER = find_library(["libmp3decoder"], [THIS_DIR, "$(THIS_DIR)/../external/bin"])
-end
-)
-
-if ~isinteractive()
-    main()
-end
+end # module Worker
