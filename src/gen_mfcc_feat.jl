@@ -370,17 +370,6 @@ function mp3decoder!(ifname::String, osig::AbstractVector{Int16})
     return NREAD, mp3params
 end
 
-function process_range{_Tp}(inames::AbstractVector{_Tp}, istart::Int, iend::Int)
-    const NELEM = iend - istart
-    for idx in [istart:iend]
-        println("$(idx)   $(TRAIN_MP3)/$(TRAIN[idx, 1])")
-        const NSAMP = 10 * 44100
-        const NCHAN = 2
-        #sig = Array(Int16, NSAMP * NCHAN)
-        #const NREAD, MP3PARAMS = mp3decoder!("$(TRAIN_MP3)/$(TRAIN[idx, 1])", sig)
-    end
-end
-
 function downsample{_iTp, _oTp<:FloatingPoint}(
     # code_native(downsample, (Int, Bool, Vector{Int}, Vector{Float64}))
     ratio::Int,
@@ -406,6 +395,41 @@ function downsample{_iTp, _oTp<:FloatingPoint}(
     end
 end
 
+function gen_mfcc{_Tp}(TRAIN::AbstractArray{_Tp, 2})
+
+    const DATA_DIR = "$(THIS_DIR)/../../data"
+    const TRAIN_MP3 = "$(DATA_DIR)/train"
+
+    const NSAMP = 10 * 44100
+    const NCHAN = 2
+    full_sig = Array(Int16, NSAMP * NCHAN)
+    sig = similar(full_sig, Float64)
+
+    vvX = Vector{Float64}[]
+    y = ASCIIString[]
+
+    for irow = 1:size(TRAIN, 1)
+        println("$(TRAIN[irow, 1])")
+        const NREAD, MP3PARAMS = mp3decoder!("$(TRAIN_MP3)/$(TRAIN[irow, 1])", full_sig)
+        @inbounds full_sig[1 + NREAD / 2:end] = 0
+
+        const DOWN_RATIO = 4
+        downsample(DOWN_RATIO, true, full_sig, sig)
+
+        print("  [MFCC]  ")
+        @time mfcc_feat = mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
+
+        push!(vvX, vec(mfcc_feat))
+        push!(y, TRAIN[irow, 2])
+    end
+
+    return (vvX, y)
+end
+
+function reduce(lhs::(Vector{Vector{Float64}}, Vector{ASCIIString}), rhs::(Vector{Vector{Float64}}, Vector{ASCIIString}))
+    return (vcat(lhs[1], rhs[1]), vcat(lhs[2], rhs[2]))
+end
+
 function main()
     const DATA_DIR = "$(THIS_DIR)/../../data"
     const CSV_DIR = DATA_DIR
@@ -424,7 +448,7 @@ function main()
     y = ASCIIString[]
 
     #for idx in 2:NROW
-    for idx in 2:22
+    for idx in 2:5
         println("$(TRAIN[idx, 1])")
         const NREAD, MP3PARAMS = mp3decoder!("$(TRAIN_MP3)/$(TRAIN[idx, 1])", full_sig)
         @inbounds full_sig[1 + NREAD / 2:end] = 0
@@ -439,10 +463,21 @@ function main()
         push!(y, TRAIN[idx, 2])
     end
 
+    println(size(TRAIN))
+    #const TRAIN_SUBSETS = int(linspace(1, size(TRAIN, 1), 5))
+    const TRAIN_SUBSETS = int(linspace(1, 30, 5)) # start from 1 to skip the header row
+    println(TRAIN_SUBSETS)
+    
+    foo = @parallel reduce for i = 1:length(TRAIN_SUBSETS) - 1
+        println("doing ", TRAIN_SUBSETS[i] + 1, " to ", TRAIN_SUBSETS[i + 1])
+        gen_mfcc(sub(TRAIN, TRAIN_SUBSETS[i] + 1:TRAIN_SUBSETS[i + 1], :))
+    end
+    println(foo[2])
+
     X = hcat(vvX...)
 
-    h5write("MFCC.h5", "lid/y", y)
-    h5write("MFCC.h5", "lid/X_MFCC", X)
+    #h5write("MFCC.h5", "lid/y", y)
+    #h5write("MFCC.h5", "lid/X_MFCC", X)
 end
 
 const THIS_DIR = dirname(Base.source_path())
