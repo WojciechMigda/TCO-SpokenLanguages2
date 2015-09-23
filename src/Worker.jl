@@ -424,15 +424,15 @@ function gen_mfcc{_Tp}(TRAIN::AbstractArray{_Tp, 2})
     y = ASCIIString[]
 
     for irow = 1:size(TRAIN, 1)
-        println("$(TRAIN[irow, 1])")
+        #println("$(TRAIN[irow, 1])")
         const NREAD, MP3PARAMS = mp3decoder!("$(TRAIN_MP3)/$(TRAIN[irow, 1])", full_sig)
         @inbounds full_sig[1 + NREAD / 2:end] = 0
 
         const DOWN_RATIO = 4
         downsample(DOWN_RATIO, true, full_sig, sig)
 
-        print("  [MFCC]  ")
-        @time mfcc_feat = mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
+        #print("  [MFCC]  ")
+        mfcc_feat = mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
 
         push!(vvX, vec(mfcc_feat))
         push!(y, TRAIN[irow, 2])

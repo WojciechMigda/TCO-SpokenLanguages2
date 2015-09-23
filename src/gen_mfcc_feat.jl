@@ -25,7 +25,7 @@
 #
 ################################################################################
 
-addprocs(CPU_CORES)
+addprocs(div(CPU_CORES, 2))
 
 using HDF5
 @everywhere using Worker
@@ -447,40 +447,17 @@ function main()
     full_sig = Array(Int16, NSAMP * NCHAN)
     sig = similar(full_sig, Float64)
 
-    vvX = Vector{Float64}[]
-    y = ASCIIString[]
-
-    #for idx in 2:NROW
-    for idx in 2:5
-        println("$(TRAIN[idx, 1])")
-        const NREAD, MP3PARAMS = mp3decoder!("$(TRAIN_MP3)/$(TRAIN[idx, 1])", full_sig)
-        @inbounds full_sig[1 + NREAD / 2:end] = 0
-
-        const DOWN_RATIO = 4
-        downsample(DOWN_RATIO, true, full_sig, sig)
-
-        print("  [MFCC]  ")
-        @time mfcc_feat = mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
-
-        push!(vvX, vec(mfcc_feat))
-        push!(y, TRAIN[idx, 2])
-    end
-
-    println(size(TRAIN))
-    #const TRAIN_SUBSETS = int(linspace(1, size(TRAIN, 1), 5))
-    const TRAIN_SUBSETS = int(linspace(1, 30, 5)) # start from 1 to skip the header row
+    const TRAIN_SUBSETS = int(linspace(1, size(TRAIN, 1), (div(CPU_CORES, 2) + 1)))
+    #const TRAIN_SUBSETS = int(linspace(1, 30, 5)) # start from 1 to skip the header row
     println(TRAIN_SUBSETS)
 
     foo = @parallel reduce for i = 1:length(TRAIN_SUBSETS) - 1
-        println("doing ", TRAIN_SUBSETS[i] + 1, " to ", TRAIN_SUBSETS[i + 1])
+        #println("doing ", TRAIN_SUBSETS[i] + 1, " to ", TRAIN_SUBSETS[i + 1])
         Worker.gen_mfcc(sub(TRAIN, TRAIN_SUBSETS[i] + 1:TRAIN_SUBSETS[i + 1], :))
     end
-    println(foo[2])
 
-    X = hcat(vvX...)
-
-    #h5write("MFCC.h5", "lid/y", y)
-    #h5write("MFCC.h5", "lid/X_MFCC", X)
+    h5write("MFCC.h5", "lid/y", foo[2])
+    h5write("MFCC.h5", "lid/X_MFCC", hcat(foo[1]...))
 end
 
 const THIS_DIR = dirname(Base.source_path())
