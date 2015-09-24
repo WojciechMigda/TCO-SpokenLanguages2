@@ -27,7 +27,6 @@
 
 module Worker
 
-#export gen_mfcc
 export reduce
 
 using MFCC
@@ -90,7 +89,7 @@ function downsample{_iTp, _oTp<:FloatingPoint}(
     end
 end
 
-function gen_mfcc{_Tp}(TRAIN::AbstractArray{_Tp, 2})
+function gen_mfcc{_Tp}(TRAIN_X::AbstractVector{_Tp}, start::Int)
 
     const DATA_DIR = "$(THIS_DIR)/../../data"
     const TRAIN_MP3 = "$(DATA_DIR)/train"
@@ -101,44 +100,40 @@ function gen_mfcc{_Tp}(TRAIN::AbstractArray{_Tp, 2})
     sig = similar(full_sig, Float64)
 
     vvX = Vector{Float64}[]
-    y = ASCIIString[]
 
-    for irow = 1:size(TRAIN, 1)
-        #println("$(TRAIN[irow, 1])")
-        const NREAD, MP3PARAMS = mp3decoder!("$(TRAIN_MP3)/$(TRAIN[irow, 1])", full_sig)
+    for irow = 1:size(TRAIN_X, 1)
+        const NREAD, MP3PARAMS = mp3decoder!("$(TRAIN_MP3)/$(TRAIN_X[irow])", full_sig)
         @inbounds full_sig[1 + NREAD / 2:end] = 0
 
         const DOWN_RATIO = 4
         downsample(DOWN_RATIO, true, full_sig, sig)
 
-        #print("  [MFCC]  ")
         mfcc_feat = mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
 
         push!(vvX, vec(mfcc_feat))
-        push!(y, TRAIN[irow, 2])
     end
 
-    return (vvX, y)
+    return (vvX, start)
 end
 
 function reduce(
-    lhs::(Vector{Vector{Float64}}, Vector{ASCIIString}),
-    rhs::(Vector{Vector{Float64}}, Vector{ASCIIString})
+    lhs::(Vector{Vector{Float64}}, Int),
+    rhs::(Vector{Vector{Float64}}, Int)
     )
     return [lhs, rhs]
 end
 
 function reduce(
-    lhs::Vector{(Vector{Vector{Float64}}, Vector{ASCIIString})},
-    rhs::(Vector{Vector{Float64}}, Vector{ASCIIString})
+    lhs::Vector{(Vector{Vector{Float64}}, Int)},
+    rhs::(Vector{Vector{Float64}}, Int)
     )
     push!(lhs, rhs)
     return lhs
 end
 
 function reduce(
-    lhs::Vector{(Vector{Vector{Float64}}, Vector{ASCIIString})},
-    rhs::Vector{(Vector{Vector{Float64}}, Vector{ASCIIString})}
+    lhs::Vector{(Vector{Vector{Float64}}, Int)},
+    rhs::Vector{(Vector{Vector{Float64}}, Int)}
     )
     append!(lhs, rhs)
     return lhs

@@ -334,7 +334,6 @@ function mfcc(signal::Vector{Float64}, samplerate=16000, winlen=0.025, winstep=0
     :param appendEnergy: if this is true, the zeroth cepstral coefficient is replaced with the log of the total frame energy.
     :returns: A numpy array of size (NUMFRAMES by numcep) containing features. Each row holds 1 feature vector.
     """
-    println("MFCC.mfcc")
     feat, energy = fbank(signal, samplerate, winlen, winstep, nfilt, nfft, lowfreq, highfreq, preemph)
 
     feat = log(feat)
