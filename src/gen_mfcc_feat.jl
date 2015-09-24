@@ -25,7 +25,7 @@
 #
 ################################################################################
 
-addprocs(div(CPU_CORES, 1))
+addprocs(div(CPU_CORES, 2))
 
 using HDF5
 @everywhere using Worker
