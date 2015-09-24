@@ -441,30 +441,27 @@ function gen_mfcc{_Tp}(TRAIN::AbstractArray{_Tp, 2})
     return (vvX, y)
 end
 
-function reduce(lhs::(Vector{Vector{Float64}}, Vector{ASCIIString}), rhs::(Vector{Vector{Float64}}, Vector{ASCIIString}))
-    #return (vcat(lhs[1], rhs[1]), vcat(lhs[2], rhs[2]))
+function reduce(
+    lhs::(Vector{Vector{Float64}}, Vector{ASCIIString}),
+    rhs::(Vector{Vector{Float64}}, Vector{ASCIIString})
+    )
     return [lhs, rhs]
 end
 
-function reduce(lhs::Vector{(Vector{Vector{Float64}}, Vector{ASCIIString})}, rhs::(Vector{Vector{Float64}}, Vector{ASCIIString}))
+function reduce(
+    lhs::Vector{(Vector{Vector{Float64}}, Vector{ASCIIString})},
+    rhs::(Vector{Vector{Float64}}, Vector{ASCIIString})
+    )
     push!(lhs, rhs)
     return lhs
 end
 
-"""
 function reduce(
-    lhs::((Int, Int), (Vector{Vector{Float64}}, Vector{ASCIIString})),
-    rhs::((Int, Int), (Vector{Vector{Float64}}, Vector{ASCIIString}))
+    lhs::Vector{(Vector{Vector{Float64}}, Vector{ASCIIString})},
+    rhs::Vector{(Vector{Vector{Float64}}, Vector{ASCIIString})}
     )
-    return size(lhs[2][2], 1) + size(rhs[2][2], 1)
+    append!(lhs, rhs)
+    return lhs
 end
-
-function reduce(
-    lhs::Int,
-    rhs::((Int, Int), (Vector{Vector{Float64}}, Vector{ASCIIString}))
-    )
-    return lhs + size(rhs[2][2], 1)
-end
-"""
 
 end # module Worker
