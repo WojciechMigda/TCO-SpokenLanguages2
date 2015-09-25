@@ -89,10 +89,10 @@ function downsample{_iTp, _oTp<:FloatingPoint}(
     end
 end
 
-function gen_mfcc{_Tp}(TRAIN_X::AbstractVector{_Tp}, start::Int)
+function gen_mfcc{_Tp}(MP3_DIR::ASCIIString, TRAIN_X::AbstractVector{_Tp}, start::Int)
 
     const DATA_DIR = "$(THIS_DIR)/../../data"
-    const TRAIN_MP3 = "$(DATA_DIR)/train"
+    const TRAIN_MP3 = MP3_DIR
 
     const NSAMP = 10 * 44100
     const NCHAN = 2
