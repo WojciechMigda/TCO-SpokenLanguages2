@@ -39,8 +39,21 @@ function main()
     const TEST = readdlm(TEST_CSV, ASCIIString)
 
     h5write("trainXmp3.h5", "lid/train/X/mp3", TRAIN[:, 1])
-    h5write("trainYmp3.h5", "lid/train/y", TRAIN[:, 2])
+    h5write("trainYlang.h5", "lid/train/y/lang", TRAIN[:, 2])
     h5write("testXmp3.h5", "lid/test/X/mp3", TEST[:, 1])
+
+    const LANGUAGES = Set(TRAIN[:, 2])
+    ids = [0:length(LANGUAGES) - 1]
+    lang2id = [x::ASCIIString => y::Int for (x, y) in zip(LANGUAGES, ids)]
+
+    labels = [lang2id[lang] for lang in TRAIN[:, 2]]
+    h5write("trainYlabels.h5", "lid/train/y/labels", labels)
+
+    h5write("ydict.h5", "lid/data/y/lang", vcat(keys(lang2id)...))
+    fid = h5open("ydict.h5", "r+")
+    lang_dset = d_create(fid, "lid/data/y/labels", datatype(Int), dataspace(size(ids)))
+    lang_dset[:] = vcat(values(lang2id)...)
+    close(fid)
 end
 
 if ~isinteractive()
