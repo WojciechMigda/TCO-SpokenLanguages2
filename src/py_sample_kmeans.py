@@ -104,16 +104,18 @@ def main(argv):
             pass
         pass
 
-    if OP == 1 or OP == 3:
-        transform(NCLUST, SEED,
+        if OP == 1 or OP == 3:
+            transform(NCLUST, SEED,
               'trainXmfcc.h5', 'lid/train/X/mfcc',
               'trainX_sample_kmeans_' + str(NCLUST) +'.h5', 'lid/train/X/sample_kmeans_' + str(NCLUST))
-        pass
+            pass
 
-    if OP == 2 or OP == 3:
-        transform(NCLUST, SEED,
+        if OP == 2 or OP == 3:
+            transform(NCLUST, SEED,
               'testXmfcc.h5', 'lid/test/X/mfcc',
               'testX_sample_kmeans_' + str(NCLUST) +'.h5', 'lid/test/X/sample_kmeans_' + str(NCLUST))
+            pass
+
         pass
 
     pass
