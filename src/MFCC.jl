@@ -316,8 +316,9 @@ end
 
 ################################################################################
 
-function mfcc(signal::Vector{Float64}, samplerate=16000, winlen=0.025, winstep=0.01, numcep=13,
-               nfilt=26, nfft=512, lowfreq=0, highfreq=samplerate/2, preemph=0.97, ceplifter=22, appendEnergy=true)
+function mfcc(signal::Vector{Float64};
+              samplerate=16000., winlen=0.025, winstep=0.01, numcep=13,
+              nfilt=26, nfft=512, lowfreq=0, highfreq=samplerate/2, preemph=0.97, ceplifter=22, appendEnergy=true)
     """Compute MFCC features from an audio signal.
 
     :param signal: the audio signal from which to compute features. Should be an N*1 array

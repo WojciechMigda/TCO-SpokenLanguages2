@@ -90,8 +90,8 @@ function downsample{_iTp, _oTp<:FloatingPoint}(
 end
 
 function gen_mfcc{_Tp}(MP3_DIR::String, TRAIN_X::AbstractVector{_Tp}, start::Int;
-                       samplerate=16000, winlen=0.025, winstep=0.01, numcep=13,
-                       nfilt=26, nfft=512, lowfreq=0, highfreq=samplerate/2, preemph=0.97, ceplifter=22, appendEnergy=true)
+                       _winlen=0.025, _winstep=0.01, _numcep=13,
+                       _nfilt=26, _nfft=512, _preemph=0.97, _ceplifter=22, _appendEnergy=true)
 
     const DATA_DIR = "$(THIS_DIR)/../../data"
     const TRAIN_MP3 = MP3_DIR
@@ -110,7 +110,8 @@ function gen_mfcc{_Tp}(MP3_DIR::String, TRAIN_X::AbstractVector{_Tp}, start::Int
         const DOWN_RATIO = 4
         downsample(DOWN_RATIO, true, full_sig, sig)
 
-        mfcc_feat = mfcc(sig, MP3PARAMS.rate / float(DOWN_RATIO))
+        mfcc_feat = mfcc(sig, samplerate=MP3PARAMS.rate / float(DOWN_RATIO),
+                         winlen=_winlen, winstep=_winstep, numcep=_numcep, nfilt=_nfilt, nfft=_nfft, preemph=_preemph, ceplifter=_ceplifter, appendEnergy=_appendEnergy)
 
         push!(vvX, vec(mfcc_feat))
     end

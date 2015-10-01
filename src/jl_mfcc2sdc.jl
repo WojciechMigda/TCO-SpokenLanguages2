@@ -67,24 +67,33 @@ function sdc{T<:FloatingPoint}(x::Matrix{T}, n::Int=7, d::Int=1, p::Int=3, k::In
 end
 
 function transform(
+    NMFCC::Int,
     N::Int, D::Int, P::Int, K::Int,
-    MFCC_H5_FNAME::ASCIIString, MFCC_H5_DSET::ASCIIString, OUT_H5_FNAME::ASCIIString, OUT_H5_DSET::ASCIIString)
+    MFCC_H5_FNAME::String, MFCC_H5_DSET::String, OUT_H5_FNAME::String, OUT_H5_DSET::String)
 
     fid = h5open(MFCC_H5_FNAME, "r")
     fullX = fid[MFCC_H5_DSET]
 
     const NCOLS = size(fullX, 2)
+    @assert length(fullX[:, 1]) % NMFCC == 0
+    const NFRAMES = div(length(fullX[:, 1]), NMFCC)
     
-    for coli = 1:2#NCOLS
-        Xi = reshape(fullX[:, coli], (1001, 13))
-        sdc_ = sdc(Xi[:, 2:13], N, D, P, K)
-        println(size(Xi))
-        println(size(sdc_))
-        println(sdc_[1:5, :])
+    ofid = h5open(OUT_H5_FNAME, "w")
+    odset = d_create(ofid, OUT_H5_DSET, datatype(Float64), dataspace(N * K * NFRAMES, NCOLS))
+    
+    for coli = 1:NCOLS
+        Xi = reshape(fullX[:, coli], (NFRAMES, NMFCC))
+        sdc_ = sdc(Xi, N, D, P, K)
+        odset[:, coli] = vec(sdc_)
+        
+        if coli % 100 == 0
+            println(coli)
+        end
     end
 
     close(fid)
-
+    close(ofid)
+    
 end
 
 function parse_commandline()
@@ -146,8 +155,10 @@ function main(args)
         println("  $arg  =>  $val")
     end
 
-    #transform(parsed_args["sdc-n"], parsed_args["sdc-d"], parsed_args["sdc-p"], parsed_args["sdc-k"],
-    #    parsed_args["h5-mfcc-file"], parsed_args["h5-mfcc-dset"], parsed_args["h5-sdc-file"], parsed_args["h5-sdc-dset"])
+    transform(
+        parsed_args["nmfcc"],
+        parsed_args["sdc-n"], parsed_args["sdc-d"], parsed_args["sdc-p"], parsed_args["sdc-k"],
+        parsed_args["h5-mfcc-file"], parsed_args["h5-mfcc-dset"], parsed_args["h5-sdc-file"], parsed_args["h5-sdc-dset"])
 
 end
 

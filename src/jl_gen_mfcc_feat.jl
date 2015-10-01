@@ -57,9 +57,9 @@ function generate(
             MP3_DIR,
             sub(TRAIN_X, TRAIN_SUBSETS[i] + 1:TRAIN_SUBSETS[i + 1]),
             TRAIN_SUBSETS[i] + 1,
-            nfilt=NFILT,
-            numcep=NMFCC,
-            appendEnergy=ENERGY
+            _nfilt=NFILT,
+            _numcep=NMFCC,
+            _appendEnergy=ENERGY
             )
     end
 
@@ -73,6 +73,8 @@ function generate(
     
     Xdset = d_create(fid, MFCC_H5_DSET, datatype(Float64), dataspace(size(foo[][1][], 1), NROWS))
 
+    println("Saving Xdset")
+
     for vt = 1:size(foo, 1)
         pos = foo[vt][2]
         for vx = 1:size(foo[vt][1], 1)
@@ -82,11 +84,15 @@ function generate(
         
         gc()
     end
+    
+    println("Xdset saved")
 
     gc()
     
     close(Xdset)
     close(fid)
+
+    println("Generating done")
 end
 
 function parse_commandline(THIS_DIR::ASCIIString)
